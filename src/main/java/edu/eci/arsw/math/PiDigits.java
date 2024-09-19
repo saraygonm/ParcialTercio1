@@ -1,4 +1,7 @@
 package edu.eci.arsw.math;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
 
 ///  <summary>
 ///  An implementation of the Bailey-Borwein-Plouffe formula for calculating hexadecimal
@@ -7,9 +10,12 @@ package edu.eci.arsw.math;
 ///  *** Translated from C# code: https://github.com/mmoroney/DigitsOfPi ***
 ///  </summary>
 public class PiDigits {
+    //impresion según el usuario
+    public static Scanner sca = new Scanner(System.in);
 
-    private static int DigitsPerSum = 8;
-    private static double Epsilon = 1e-17;
+
+    // private static int DigitsPerSum = 8;
+    //private static double Epsilon = 1e-17;
 
     
     /**
@@ -18,96 +24,124 @@ public class PiDigits {
      * @param count The number of digits to return
      * @return An array containing the hexadecimal digits.
      */
-    public static byte[] getDigits(int start, int count) {
-        if (start < 0) {
-            throw new RuntimeException("Invalid Interval");
-        }
+    public static byte[] getDigits(int start, int count, int N) {
+        byte [] digits = new byte[count];
+        int digitsPerThread = count/ N;
+        boolean ThreadRun = true;
+        Object lockObject = new Object();
+        List<PiDigitsThread> threads = new ArrayList<>();
 
-        if (count < 0) {
-            throw new RuntimeException("Invalid Interval");
-        }
 
-        byte[] digits = new byte[count];
-        double sum = 0;
 
-        for (int i = 0; i < count; i++) {
-            if (i % DigitsPerSum == 0) {
-                sum = 4 * sum(1, start)
-                        - 2 * sum(4, start)
-                        - sum(5, start)
-                        - sum(6, start);
+        verificarIntervalo(start, count);
+        creaThreads(start, N, threads, digitsPerThread, lockObject);
 
-                start += DigitsPerSum;
+        //se usa para detener en caso de que un thear este ejecutandose
+        try {
+            while (ThreadRun) {
+                ThreadRun = false;
+                for (PiDigitsThread thread : threads) {
+                    if (thread.isAlive()) {
+                        ThreadRun= true;
+                        break;
+                    }
+                }
+
+                //Dormimos el tread
+                Thread.sleep(5000);
+                stopAndExec(threads, lockObject);
             }
-
-            sum = 16 * (sum - Math.floor(sum));
-            digits[i] = (byte) sum;
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
-
+        //
+        getResults(threads, digits, digitsPerThread);
+        getTotalDigits(threads);
         return digits;
     }
 
-    /// <summary>
-    /// Returns the sum of 16^(n - k)/(8 * k + m) from 0 to k.
-    /// </summary>
-    /// <param name="m"></param>
-    /// <param name="n"></param>
-    /// <returns></returns>
-    private static double sum(int m, int n) {
-        double sum = 0;
-        int d = m;
-        int power = n;
-
-        while (true) {
-            double term;
-
-            if (power > 0) {
-                term = (double) hexExponentModulo(power, d) / d;
-            } else {
-                term = Math.pow(16, power) / d;
-                if (term < Epsilon) {
-                    break;
-                }
-            }
-
-            sum += term;
-            power--;
-            d += 8;
+    /**
+     * Detiene y ejecuta los threads
+     */
+    private static void stopAndExec(List<PiDigitsThread> threads, Object lockObject) throws InterruptedException {
+        for (PiDigitsThread thread : threads) {
+            thread.setExec(false);
         }
-
-        return sum;
+        System.out.println("Deteneiendo los threads: ");
+        getTotalDigits(threads);
+        System.out.println("Press ENTER para continuar....");
+        System.out.println("------------------------------ ");
+        sca.nextLine();
+        System.out.println("Resumen Total de los threads (analizando....): ");
+        for (PiDigitsThread thread : threads) {
+            thread.setExec(true);
+            synchronized (lockObject) {
+                lockObject.notifyAll();
+            }
+        }
+    }
+    /**
+     * Crea los threads
+     */
+    private static void creaThreads(int start, int N, List<PiDigitsThread> threads, int digitsPerThread, Object lockObject) {
+        for (int i = 0; i < N; i++) {
+            PiDigitsThread thread = new PiDigitsThread(start, digitsPerThread, i, lockObject);
+            start += digitsPerThread; // Actualiza el inicio del intervalo
+            threads.add(thread); // se añade el  uevo thread
+            thread.start();
+        }
     }
 
-    /// <summary>
-    /// Return 16^p mod m.
-    /// </summary>
-    /// <param name="p"></param>
-    /// <param name="m"></param>
-    /// <returns></returns>
-    private static int hexExponentModulo(int p, int m) {
-        int power = 1;
-        while (power * 2 <= p) {
-            power *= 2;
+    /**
+     * Obtener los digitos  Thread
+     */
+
+    private static void getThreadDigits(byte[] digits, int digitsPerThread, PiDigitsThread thread) {
+        byte[] threadDigits = thread.CalculoDigits();
+        //ciclo para validar  la longitud de los digitos
+        for (int i = 0; i < threadDigits.length; i++) {
+            // Actualizar digitos en arreglo
+            digits[i + thread.getid() * digitsPerThread] = threadDigits[i];
         }
-
-        int result = 1;
-
-        while (power > 0) {
-            if (p >= power) {
-                result *= 16;
-                result %= m;
-                p -= power;
-            }
-
-            power /= 2;
-
-            if (power > 0) {
-                result *= result;
-                result %= m;
-            }
-        }
-
-        return result;
     }
+    /**
+     * determinacion si el intervalo  es valido
+     */
+    private static void verificarIntervalo( int start, int count){
+        if (start < 0  ||  count < 0 ) { //tanto el start como el count
+            throw new RuntimeException("Intervalo valido");
+        }
+    }
+
+    /**
+     * Imprimir la totalidad de los digitos procesados
+     */
+    private static void getTotalDigits(List<PiDigitsThread> threads) {
+        int totalDigits = 0;
+        for (PiDigitsThread thread : threads) {
+            totalDigits += thread.procesos();
+        }
+        System.out.println("Total de digitos en el proceso: " + totalDigits);
+    }
+
+    /**
+     * imprimir los Resultados de los  Threads
+     */
+    private static void getResults(List<PiDigitsThread> threads, byte[] digits, int digitsPerThread) {
+        for (PiDigitsThread thread : threads) {
+            try {
+                thread.join();
+                getThreadDigits(digits, digitsPerThread, thread);
+            } catch (InterruptedException ex) {
+                System.out.println("El Thread ha sido interrumpido");
+            }
+        }
+    }
+
+
 
 }
+
+
+
+
